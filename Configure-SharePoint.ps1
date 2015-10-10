@@ -1,5 +1,3 @@
-
-
 Configuration CreateSharePointFarm {
   param (
         [Parameter(Mandatory=$true)] [ValidateNotNullorEmpty()] [string] $FarmName,
@@ -23,18 +21,17 @@ Configuration CreateSharePointFarm {
 
     $FarmPrefix =  $FarmName + "_"
 
-
-
-    Node "localhost" {
-
+    Node $AllNodes.NodeName
+    {
         xDisk LogsDisk { DiskNumber = 2; DriveLetter = "l" }
         xDisk IndexDisk { DiskNumber = 3; DriveLetter = "i" }
- 
+        
 
         xCredSSP CredSSPServer { Ensure = "Present"; Role = "Server" } 
         xCredSSP CredSSPClient { Ensure = "Present"; Role = "Client"; DelegateComputers = '*.askwictor.com','$env:COMPUTERNAME', 'localhost' }
 
-        Script HighPerformancePowerPlan{  
+        Script HighPerformancePowerPlan
+        {  
             SetScript   = { Powercfg -SETACTIVE SCHEME_MIN }  
             TestScript  = { return ( Powercfg -getactivescheme) -like "*High Performance*" }  
             GetScript   = { return @{ Powercfg = ( "{0}" -f ( powercfg -getactivescheme ) ) } }
@@ -57,6 +54,26 @@ Configuration CreateSharePointFarm {
 
 
    
+ 
+    }
+
+    Node $AllNodes.Where{$_.Role -eq "FirstServer"}.NodeName 
+    {
+
+        # This is just for demo purposes
+        File RemoveAppOffline{
+            DestinationPath = "C:\inetpub\wwwroot\wss\VirtualDirectories\80\App_Offline.htm"
+            Ensure = "Absent"
+            DependsOn = "[xSPSite]MySiteHost"
+        }
+
+        # This is just for demo purposes
+        File AddAppOffline{
+            DestinationPath = "C:\inetpub\wwwroot\wss\VirtualDirectories\80"
+            Ensure = "Present"
+            SourcePath = "c:\DSC\App_Offline.htm"
+        }
+        
         xSPCreateFarm CreateSPFarm
         {
             DatabaseServer           = $DatabaseServer
@@ -67,7 +84,7 @@ Configuration CreateSharePointFarm {
             CentralAdministrationPort = 21000
             ServerRole               = "Custom"
             InstallAccount           =  $InstallAccount            
-            DependsOn                = "[xCredSSP]CredSSPClient"
+            DependsOn                = "[xCredSSP]CredSSPClient","[File]AddAppOffline"
 
         }
 
@@ -96,7 +113,7 @@ Configuration CreateSharePointFarm {
             LogSpaceInGB                                = 10
             AppAnalyticsAutomaticUploadEnabled          = $false
             CustomerExperienceImprovementProgramEnabled = $true
-            DaysToKeepLogs                              = 7
+            DaysToKeepLogs                              = 6
             DownloadErrorReportingUpdatesEnabled        = $false
             ErrorReportingAutomaticUploadEnabled        = $false
             ErrorReportingEnabled                       = $false
@@ -274,17 +291,20 @@ Configuration CreateSharePointFarm {
         {
             RebootNodeIfNeeded = $true
         }
-    }
-    
+    }    
 }
 
 $ConfigurationData = @{
     AllNodes = @(
         @{
-            NodeName="localhost"
+            NodeName="awsp1602"
+            Role = "FirstServer"
             PSDscAllowPlainTextPassword=$true # Should really not be used, use certificates instead            
-         }
+         } 
     )
+    NonNodeData =  @{
+        FarmName = "FarmA"
+    }
 }
 
 $farmAccount = Get-Credential -Message "Farm Account" -UserName "ASKWICTOR\SPFarm"
@@ -295,7 +315,7 @@ $FarmName = $env:COMPUTERNAME
 $WebApplicationUrl = "http://root.$($env:COMPUTERNAME).askwictor.com"
 $TeamSiteUrl = "http://teams.$($env:COMPUTERNAME).askwictor.com"
 $MySiteHostUrl = "http://my.$($env:COMPUTERNAME).askwictor.com"
-$DatabaseServer = $env:COMPUTERNAME
+$DatabaseServer = "awsp1601.askwictor.com"
 
 CreateSharePointFarm -ConfigurationData $ConfigurationData -Verbose `
     -InstallAccount $installAccount `
@@ -310,3 +330,5 @@ CreateSharePointFarm -ConfigurationData $ConfigurationData -Verbose `
 
 
 Start-DscConfiguration .\CreateSharePointFarm -Verbose -Wait -Force -Debug
+
+#Start-DscConfiguration .\CreateSharePointFarm -Wait -Force 
